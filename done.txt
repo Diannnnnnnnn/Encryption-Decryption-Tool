@@ -1,0 +1,613 @@
+#!/usr/bin/env python3
+"""
+Advanced File Encryption/Decryption Tool - Streamlit Version
+Supports multiple encryption algorithms with modern web interface
+Author: Python Script Generator
+"""
+
+import os
+import json
+import hashlib
+import base64
+import secrets
+from datetime import datetime
+from pathlib import Path
+import streamlit as st
+import io
+import tempfile
+
+try:
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    CRYPTO_AVAILABLE = False
+
+class EncryptionError(Exception):
+    """Custom exception for encryption-related errors"""
+    pass
+
+class AdvancedEncryption:
+    """Advanced encryption class supporting multiple algorithms"""
+    
+    def __init__(self):
+        self.supported_algorithms = {
+            'caesar': 'Caesar Cipher',
+            'vigenere': 'Vigenère Cipher', 
+            'xor': 'XOR Cipher',
+            'substitution': 'Substitution Cipher',
+            'fernet': 'Fernet (AES-based)' if CRYPTO_AVAILABLE else None
+        }
+        # Remove None values
+        self.supported_algorithms = {k: v for k, v in self.supported_algorithms.items() if v is not None}
+        self.alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        
+    def generate_key(self, algorithm, password=None):
+        """Generate encryption key based on algorithm"""
+        if algorithm == 'caesar':
+            return secrets.randbelow(25) + 1  # 1-25 to avoid 0
+        elif algorithm == 'vigenere':
+            return password or self._generate_random_key(16)
+        elif algorithm == 'xor':
+            return password or self._generate_random_key(32)
+        elif algorithm == 'substitution':
+            return self._generate_substitution_key()
+        elif algorithm == 'fernet' and CRYPTO_AVAILABLE:
+            if password:
+                return self._derive_fernet_key(password)
+            return Fernet.generate_key()
+        else:
+            raise EncryptionError(f"Unsupported algorithm: {algorithm}")
+    
+    def _generate_random_key(self, length):
+        """Generate random key of specified length"""
+        return ''.join(secrets.choice(self.alphabet + self.alphabet.lower() + '0123456789') 
+                      for _ in range(length))
+    
+    def _generate_substitution_key(self):
+        """Generate substitution cipher key"""
+        shuffled = list(self.alphabet)
+        for i in range(len(shuffled)):
+            j = secrets.randbelow(len(shuffled))
+            shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+        return ''.join(shuffled)
+    
+    def _derive_fernet_key(self, password):
+        """Derive Fernet key from password"""
+        if not CRYPTO_AVAILABLE:
+            raise EncryptionError("Cryptography library not available")
+        
+        password_bytes = password.encode()
+        salt = b'salt_1234567890'  # In production, use random salt
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(password_bytes))
+        return key
+    
+    def caesar_cipher(self, text, key, decrypt=False):
+        """Caesar cipher implementation"""
+        shift = -key if decrypt else key
+        result = ""
+        for char in text:
+            if char.isalpha():
+                ascii_offset = 65 if char.isupper() else 97
+                result += chr((ord(char) + shift - ascii_offset) % 26 + ascii_offset)
+            else:
+                result += char
+        return result
+    
+    def vigenere_cipher(self, text, key, decrypt=False):
+        """Vigenère cipher implementation"""
+        key = str(key).upper()
+        result = ""
+        key_index = 0
+        
+        for char in text:
+            if char.isalpha():
+                char_upper = char.upper()
+                key_char = key[key_index % len(key)]
+                shift = ord(key_char) - ord('A')
+                
+                if decrypt:
+                    shift = -shift
+                
+                encrypted_char = chr((ord(char_upper) - ord('A') + shift) % 26 + ord('A'))
+                result += encrypted_char if char.isupper() else encrypted_char.lower()
+                key_index += 1
+            else:
+                result += char
+        return result
+    
+    def xor_cipher(self, text, key, decrypt=False):
+        """XOR cipher implementation"""
+        result = ""
+        key_bytes = str(key).encode() if isinstance(key, (str, int)) else key
+        
+        for i, char in enumerate(text):
+            key_char = key_bytes[i % len(key_bytes)]
+            if isinstance(key_char, str):
+                key_char = ord(key_char)
+            result += chr(ord(char) ^ key_char)
+        
+        return result
+    
+    def substitution_cipher(self, text, key, decrypt=False):
+        """Substitution cipher implementation"""
+        key = str(key)
+        if len(key) != 26:
+            raise EncryptionError("Substitution key must be 26 characters long")
+            
+        if decrypt:
+            # Create reverse mapping
+            mapping = {key[i]: self.alphabet[i] for i in range(26)}
+        else:
+            mapping = {self.alphabet[i]: key[i] for i in range(26)}
+        
+        result = ""
+        for char in text:
+            if char.upper() in mapping:
+                encrypted_char = mapping[char.upper()]
+                result += encrypted_char if char.isupper() else encrypted_char.lower()
+            else:
+                result += char
+        return result
+    
+    def fernet_cipher(self, text, key, decrypt=False):
+        """Fernet encryption implementation"""
+        if not CRYPTO_AVAILABLE:
+            raise EncryptionError("Cryptography library not available for Fernet")
+        
+        try:
+            fernet = Fernet(key)
+            if decrypt:
+                return fernet.decrypt(text.encode()).decode()
+            else:
+                return fernet.encrypt(text.encode()).decode()
+        except Exception as e:
+            raise EncryptionError(f"Fernet operation failed: {str(e)}")
+    
+    def encrypt_text(self, text, algorithm, key):
+        """Encrypt text using specified algorithm"""
+        if algorithm == 'caesar':
+            return self.caesar_cipher(text, key)
+        elif algorithm == 'vigenere':
+            return self.vigenere_cipher(text, key)
+        elif algorithm == 'xor':
+            return self.xor_cipher(text, key)
+        elif algorithm == 'substitution':
+            return self.substitution_cipher(text, key)
+        elif algorithm == 'fernet':
+            return self.fernet_cipher(text, key)
+        else:
+            raise EncryptionError(f"Unsupported algorithm: {algorithm}")
+    
+    def decrypt_text(self, text, algorithm, key):
+        """Decrypt text using specified algorithm"""
+        if algorithm == 'caesar':
+            return self.caesar_cipher(text, key, decrypt=True)
+        elif algorithm == 'vigenere':
+            return self.vigenere_cipher(text, key, decrypt=True)
+        elif algorithm == 'xor':
+            return self.xor_cipher(text, key, decrypt=True)
+        elif algorithm == 'substitution':
+            return self.substitution_cipher(text, key, decrypt=True)
+        elif algorithm == 'fernet':
+            return self.fernet_cipher(text, key, decrypt=True)
+        else:
+            raise EncryptionError(f"Unsupported algorithm: {algorithm}")
+
+def initialize_session_state():
+    """Initialize Streamlit session state variables"""
+    if 'encryption_history' not in st.session_state:
+        st.session_state.encryption_history = []
+    if 'generated_key' not in st.session_state:
+        st.session_state.generated_key = None
+    if 'algorithm' not in st.session_state:
+        st.session_state.algorithm = 'caesar'
+
+def add_to_history(operation, algorithm, filename, timestamp):
+    """Add operation to history"""
+    st.session_state.encryption_history.append({
+        'operation': operation,
+        'algorithm': algorithm,
+        'filename': filename,
+        'timestamp': timestamp
+    })
+    # Keep only last 10 operations
+    if len(st.session_state.encryption_history) > 10:
+        st.session_state.encryption_history.pop(0)
+
+def main():
+    """Main Streamlit application"""
+    st.set_page_config(
+        page_title="Advanced File Encryption Tool",
+        page_icon="🔒",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    initialize_session_state()
+    encryptor = AdvancedEncryption()
+    
+    # Custom CSS
+    st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        text-align: center;
+        color: #1f77b4;
+        margin-bottom: 2rem;
+    }
+    .algorithm-info {
+        background-color: #000000;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
+    .success-box {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
+    .error-box {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Header
+    st.markdown('<div class="main-header">🔒 Advanced File Encryption Tool</div>', unsafe_allow_html=True)
+    
+    # Sidebar
+    with st.sidebar:
+        st.header("⚙️ Settings")
+        
+        # Algorithm selection
+        algorithm = st.selectbox(
+            "Encryption Algorithm",
+            options=list(encryptor.supported_algorithms.keys()),
+            format_func=lambda x: encryptor.supported_algorithms[x],
+            key="algorithm_select"
+        )
+        
+        # Algorithm information
+        algorithm_descriptions = {
+            'caesar': "Simple substitution cipher with fixed shift",
+            'vigenere': "Polyalphabetic cipher using keyword",
+            'xor': "Bitwise XOR operation with key",
+            'substitution': "Each letter mapped to different letter",
+            'fernet': "Modern symmetric encryption (AES-based)"
+        }
+        
+        st.markdown(f"""
+        <div class="algorithm-info">
+        <strong>{encryptor.supported_algorithms[algorithm]}</strong><br>
+        {algorithm_descriptions[algorithm]}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Key generation section
+        st.subheader("🔑 Key Management")
+        
+        if algorithm == 'fernet' and CRYPTO_AVAILABLE:
+            password_mode = st.checkbox("Use password-based key", value=True)
+            if password_mode:
+                password = st.text_input("Password", type="password")
+                if st.button("Generate Key from Password"):
+                    if password:
+                        try:
+                            key = encryptor.generate_key(algorithm, password)
+                            st.session_state.generated_key = key
+                            st.success("Key generated from password!")
+                        except Exception as e:
+                            st.error(f"Error generating key: {str(e)}")
+                    else:
+                        st.warning("Please enter a password")
+            else:
+                if st.button("Generate Random Key"):
+                    try:
+                        key = encryptor.generate_key(algorithm)
+                        st.session_state.generated_key = key
+                        st.success("Random key generated!")
+                    except Exception as e:
+                        st.error(f"Error generating key: {str(e)}")
+        else:
+            if st.button("Generate Random Key"):
+                try:
+                    key = encryptor.generate_key(algorithm)
+                    st.session_state.generated_key = key
+                    st.success(f"Key generated: {key}")
+                except Exception as e:
+                    st.error(f"Error generating key: {str(e)}")
+        
+        # Manual key input
+        if algorithm == 'caesar':
+            manual_key = st.number_input("Or enter Caesar shift (1-25)", min_value=1, max_value=25, value=3)
+        else:
+            manual_key = st.text_input("Or enter key manually", type="password" if algorithm == 'fernet' else "default")
+        
+        # History section
+        st.subheader("📜 Recent Operations")
+        if st.session_state.encryption_history:
+            for i, hist in enumerate(reversed(st.session_state.encryption_history[-5:])):
+                st.text(f"{hist['operation'].title()} - {hist['algorithm']} - {hist['timestamp']}")
+        else:
+            st.text("No operations yet")
+        
+        if st.button("Clear History"):
+            st.session_state.encryption_history = []
+            st.rerun()
+    
+    # Main content
+    tab1, tab2, tab3 = st.tabs(["📁 File Operations", "✏️ Text Operations", "ℹ️ Help"])
+    
+    with tab1:
+        st.header("File Encryption/Decryption")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🔐 Encrypt File")
+            
+            encrypt_file = st.file_uploader(
+                "Choose file to encrypt",
+                type=['txt', 'md', 'py', 'js', 'html', 'css', 'json', 'xml'],
+                key="encrypt_upload"
+            )
+            
+            if encrypt_file is not None:
+                # Determine key to use
+                key_to_use = None
+                if st.session_state.generated_key is not None:
+                    key_to_use = st.session_state.generated_key
+                elif manual_key:
+                    key_to_use = manual_key
+                
+                if key_to_use is not None:
+                    if st.button("🔐 Encrypt File", type="primary"):
+                        try:
+                            # Read file content
+                            content = encrypt_file.read().decode('utf-8')
+                            
+                            # Encrypt content
+                            encrypted_content = encryptor.encrypt_text(content, algorithm, key_to_use)
+                            
+                            # Create download button
+                            encrypted_bytes = encrypted_content.encode('utf-8')
+                            st.download_button(
+                                label="📥 Download Encrypted File",
+                                data=encrypted_bytes,
+                                file_name=f"encrypted_{encrypt_file.name}",
+                                mime="text/plain"
+                            )
+                            
+                            # Add to history
+                            add_to_history("encrypt", algorithm, encrypt_file.name, datetime.now().strftime("%H:%M:%S"))
+                            
+                            st.markdown(f"""
+                            <div class="success-box">
+                            ✅ File encrypted successfully!<br>
+                            Algorithm: {encryptor.supported_algorithms[algorithm]}<br>
+                            Original size: {len(content)} characters<br>
+                            Encrypted size: {len(encrypted_content)} characters
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                        except Exception as e:
+                            st.markdown(f"""
+                            <div class="error-box">
+                            ❌ Encryption failed: {str(e)}
+                            </div>
+                            """, unsafe_allow_html=True)
+                else:
+                    st.warning("⚠️ Please generate a key or enter one manually")
+        
+        with col2:
+            st.subheader("🔓 Decrypt File")
+            
+            decrypt_file = st.file_uploader(
+                "Choose file to decrypt",
+                type=['txt', 'md', 'py', 'js', 'html', 'css', 'json', 'xml'],
+                key="decrypt_upload"
+            )
+            
+            if decrypt_file is not None:
+                # Determine key to use
+                key_to_use = None
+                if st.session_state.generated_key is not None:
+                    key_to_use = st.session_state.generated_key
+                elif manual_key:
+                    key_to_use = manual_key
+                
+                if key_to_use is not None:
+                    if st.button("🔓 Decrypt File", type="primary"):
+                        try:
+                            # Read encrypted content
+                            encrypted_content = decrypt_file.read().decode('utf-8')
+                            
+                            # Decrypt content
+                            decrypted_content = encryptor.decrypt_text(encrypted_content, algorithm, key_to_use)
+                            
+                            # Create download button
+                            decrypted_bytes = decrypted_content.encode('utf-8')
+                            original_name = decrypt_file.name.replace("encrypted_", "").replace(".txt", "")
+                            st.download_button(
+                                label="📥 Download Decrypted File",
+                                data=decrypted_bytes,
+                                file_name=f"decrypted_{original_name}",
+                                mime="text/plain"
+                            )
+                            
+                            # Add to history
+                            add_to_history("decrypt", algorithm, decrypt_file.name, datetime.now().strftime("%H:%M:%S"))
+                            
+                            st.markdown(f"""
+                            <div class="success-box">
+                            ✅ File decrypted successfully!<br>
+                            Algorithm: {encryptor.supported_algorithms[algorithm]}<br>
+                            Encrypted size: {len(encrypted_content)} characters<br>
+                            Decrypted size: {len(decrypted_content)} characters
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                        except Exception as e:
+                            st.markdown(f"""
+                            <div class="error-box">
+                            ❌ Decryption failed: {str(e)}<br>
+                            Make sure you're using the correct key and algorithm.
+                            </div>
+                            """, unsafe_allow_html=True)
+                else:
+                    st.warning("⚠️ Please generate a key or enter one manually")
+    
+    with tab2:
+        st.header("Text Encryption/Decryption")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Input Text")
+            input_text = st.text_area("Enter text to encrypt/decrypt", height=200)
+            
+            # Determine key to use
+            key_to_use = None
+            if st.session_state.generated_key is not None:
+                key_to_use = st.session_state.generated_key
+            elif manual_key:
+                key_to_use = manual_key
+            
+            if input_text and key_to_use is not None:
+                col_enc, col_dec = st.columns(2)
+                
+                with col_enc:
+                    if st.button("🔐 Encrypt Text"):
+                        try:
+                            encrypted = encryptor.encrypt_text(input_text, algorithm, key_to_use)
+                            st.session_state.text_result = encrypted
+                            st.session_state.text_operation = "encrypted"
+                        except Exception as e:
+                            st.error(f"Encryption failed: {str(e)}")
+                
+                with col_dec:
+                    if st.button("🔓 Decrypt Text"):
+                        try:
+                            decrypted = encryptor.decrypt_text(input_text, algorithm, key_to_use)
+                            st.session_state.text_result = decrypted
+                            st.session_state.text_operation = "decrypted"
+                        except Exception as e:
+                            st.error(f"Decryption failed: {str(e)}")
+        
+        with col2:
+            st.subheader("Output")
+            if 'text_result' in st.session_state:
+                st.text_area(
+                    f"Result ({st.session_state.text_operation})",
+                    value=st.session_state.text_result,
+                    height=200
+                )
+                
+                # Download button for text result
+                st.download_button(
+                    label=f"📥 Download {st.session_state.text_operation.title()} Text",
+                    data=st.session_state.text_result,
+                    file_name=f"{st.session_state.text_operation}_text.txt",
+                    mime="text/plain"
+                )
+            else:
+                st.text_area("Result will appear here", value="", height=200, disabled=True)
+    
+    with tab3:
+        st.header("Help & Information")
+        
+        st.markdown("""
+        ## 🔍 Algorithm Descriptions
+        
+        ### Caesar Cipher
+        - **Type**: Simple substitution cipher
+        - **Key**: Number (1-25)
+        - **Security**: Low - easily broken
+        - **Use case**: Educational purposes, simple obfuscation
+        
+        ### Vigenère Cipher
+        - **Type**: Polyalphabetic substitution cipher
+        - **Key**: Word or phrase
+        - **Security**: Medium - stronger than Caesar but still breakable
+        - **Use case**: Historical encryption, moderate security needs
+        
+        ### XOR Cipher
+        - **Type**: Bitwise operation cipher
+        - **Key**: Any string
+        - **Security**: Depends on key quality
+        - **Use case**: Quick encryption, stream ciphers
+        
+        ### Substitution Cipher
+        - **Type**: Monoalphabetic substitution
+        - **Key**: 26-character string (alphabet permutation)
+        - **Security**: Low-medium - vulnerable to frequency analysis
+        - **Use case**: Puzzles, basic encryption
+        
+        ### Fernet (AES-based)
+        - **Type**: Modern symmetric encryption
+        - **Key**: 256-bit key or password-derived
+        - **Security**: High - cryptographically secure
+        - **Use case**: Production encryption, sensitive data
+        
+        ## 📋 Usage Instructions
+        
+        1. **Select Algorithm**: Choose from the dropdown in the sidebar
+        2. **Generate Key**: Use the key generation buttons or enter manually
+        3. **File Operations**: Upload files to encrypt/decrypt
+        4. **Text Operations**: Enter text directly for quick operations
+        5. **Download Results**: Use download buttons to save results
+        
+        ## ⚠️ Security Notes
+        
+        - Only Fernet provides cryptographic security
+        - Other algorithms are for educational/demonstration purposes
+        - Always use strong, random keys
+        - Keep keys secure and separate from encrypted data
+        - For production use, consider additional security measures
+        
+        ## 🔧 Requirements
+        
+        - Python 3.7+
+        - Streamlit
+        - cryptography library (for Fernet)
+        
+        Install dependencies:
+        ```bash
+        pip install streamlit cryptography
+        ```
+        
+        Run the application:
+        ```bash
+        streamlit run encryption_tool.py
+        ```
+        """)
+        
+        if not CRYPTO_AVAILABLE:
+            st.warning("""
+            ⚠️ **Cryptography library not installed**
+            
+            Fernet encryption is not available. Install with:
+            ```bash
+            pip install cryptography
+            ```
+            """)
+
+if __name__ == "__main__":
+    main()
